@@ -1,6 +1,5 @@
-/// A better implementation of ref_engine.rs
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::SliceRandom;
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -62,7 +61,7 @@ impl Grid {
     fn find_topmost_solid_row(&self) -> usize {
         self.solid_indices
             .iter()
-            .map(|&idx| self.index_to_coords(idx).1)
+            .map(|&idx| self.index_to_coords(idx).0)
             .min()
             .unwrap_or(self.height)
     }
@@ -72,7 +71,7 @@ impl Grid {
             .iter()
             .enumerate()
             .filter(|(idx, state)| {
-                **state == CellState::Empty && self.index_to_coords(*idx).1 < row_limit
+                **state == CellState::Empty && self.index_to_coords(*idx).0 < row_limit
             })
             .map(|(idx, _)| idx)
             .collect()
@@ -81,7 +80,7 @@ impl Grid {
     fn count_diffusing_above_row(&self, row_limit: usize) -> usize {
         self.diffusing_indices
             .iter()
-            .filter(|&&idx| self.index_to_coords(idx).1 < row_limit)
+            .filter(|&&idx| self.index_to_coords(idx).0 < row_limit)
             .count()
     }
 
@@ -157,7 +156,12 @@ impl Grid {
         }
     }
 
-    fn calculate_random_move_claim(&self, x: usize, y: usize, rng: &mut impl Rng) -> (usize, usize, bool) {
+    fn calculate_random_move_claim(
+        &self,
+        x: usize,
+        y: usize,
+        rng: &mut impl Rng,
+    ) -> (usize, usize, bool) {
         let step_x = rng.gen_range(-1..=1);
         let step_y = rng.gen_range(-1..=1);
 
@@ -174,7 +178,10 @@ impl Grid {
         (new_x as usize, new_y as usize, can_move)
     }
 
-    fn calculate_target_positions(&self, shuffled_indices: &[usize]) -> (Vec<(usize, usize)>, Vec<bool>) {
+    fn calculate_target_positions(
+        &self,
+        shuffled_indices: &[usize],
+    ) -> (Vec<(usize, usize)>, Vec<bool>) {
         let n_atoms = shuffled_indices.len();
         let mut target_positions: Vec<(usize, usize)> = vec![(0, 0); n_atoms];
         let mut can_move: Vec<bool> = vec![false; n_atoms];
@@ -188,7 +195,8 @@ impl Grid {
                 let index = shuffled_indices[idx];
                 let (x, y) = self.index_to_coords(index);
 
-                let (new_x, new_y, can_move_local) = self.calculate_random_move_claim(x, y, &mut local_rng);
+                let (new_x, new_y, can_move_local) =
+                    self.calculate_random_move_claim(x, y, &mut local_rng);
                 *target = (new_x, new_y);
                 *can_move_flag = can_move_local;
             });
@@ -250,6 +258,159 @@ impl Grid {
 
         // Phase 3: Apply moves (serial, with conflict resolution)
         self.apply_moves(&shuffled_indices, &target_positions, &can_move);
+    }
+
+    /// Check if a cell has solid neighbors and determine if it's a kink site
+    /// Returns (is_kink, has_solid_neighbor)
+    fn check_neighbors(&self, x: usize, y: usize) -> (bool, bool) {
+        let below = if x + 1 < self.height {
+            self.get_cell_by_index(self.get_index(x + 1, y)) == CellState::Solid
+        } else {
+            false
+        };
+
+        let above = if x > 0 {
+            self.get_cell_by_index(self.get_index(x - 1, y)) == CellState::Solid
+        } else {
+            false
+        };
+
+        let left = if y > 0 {
+            self.get_cell_by_index(self.get_index(x, y - 1)) == CellState::Solid
+        } else {
+            false
+        };
+
+        let right = if y + 1 < self.width {
+            self.get_cell_by_index(self.get_index(x, y + 1)) == CellState::Solid
+        } else {
+            false
+        };
+
+        let is_kink = below && (left || right);
+        let has_solid_neighbor = above || below || left || right;
+
+        (is_kink, has_solid_neighbor)
+    }
+
+    fn calculate_attachment_probability(&self, x: usize, y: usize, pa: f64, pk: f64) -> f64 {
+        let (is_kink, has_solid_neighbor) = self.check_neighbors(x, y);
+
+        if is_kink {
+            pk
+        } else if has_solid_neighbor {
+            pa
+        } else {
+            0.0
+        }
+    }
+
+    fn calculate_periodic_attachment_probability(
+        &self,
+        x: usize,
+        y: usize,
+        pa_max: f64,
+        pk: f64,
+        pa_k: f64,
+    ) -> f64 {
+        let (is_kink, has_solid_neighbor) = self.check_neighbors(x, y);
+
+        if is_kink {
+            pk
+        } else if has_solid_neighbor {
+            pa_max
+                * (pa_k * 2.0 * std::f64::consts::PI * y as f64 / self.width as f64)
+                    .sin()
+                    .powi(2)
+        } else {
+            0.0
+        }
+    }
+
+    fn calculate_solidification_decisions(&self, pa: f64, pk: f64) -> Vec<bool> {
+        let n_atoms = self.diffusing_indices.len();
+        let mut should_solidify = vec![false; n_atoms];
+
+        should_solidify
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, should_solidify_flag)| {
+                let mut local_rng = rand::thread_rng();
+                let index = self.diffusing_indices[idx];
+                let (x, y) = self.index_to_coords(index);
+
+                let probability = self.calculate_attachment_probability(x, y, pa, pk);
+                if probability > 0.0 && local_rng.gen_bool(probability) {
+                    *should_solidify_flag = true;
+                }
+            });
+
+        should_solidify
+    }
+
+    fn calculate_periodic_solidification_decisions(
+        &self,
+        pa_max: f64,
+        pk: f64,
+        pa_k: f64,
+    ) -> Vec<bool> {
+        let n_atoms = self.diffusing_indices.len();
+        let mut should_solidify = vec![false; n_atoms];
+
+        should_solidify
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(idx, should_solidify_flag)| {
+                let mut local_rng = rand::thread_rng();
+                let index = self.diffusing_indices[idx];
+                let (x, y) = self.index_to_coords(index);
+
+                let probability =
+                    self.calculate_periodic_attachment_probability(x, y, pa_max, pk, pa_k);
+                if probability > 0.0 && local_rng.gen_bool(probability) {
+                    *should_solidify_flag = true;
+                }
+            });
+
+        should_solidify
+    }
+
+    /// Apply solidification decisions (serial phase)
+    fn apply_solidification(&mut self, should_solidify: &[bool]) {
+        let mut new_diffusing_list = Vec::with_capacity(self.diffusing_indices.len());
+
+        for idx in 0..self.diffusing_indices.len() {
+            let index = self.diffusing_indices[idx];
+            if should_solidify[idx] {
+                let (x, y) = self.index_to_coords(index);
+                self.set_cell(x, y, CellState::Solid);
+                self.solid_indices.push(index);
+            } else {
+                new_diffusing_list.push(index);
+            }
+        }
+
+        self.diffusing_indices = new_diffusing_list;
+    }
+
+    pub fn solidify(&mut self, pa: f64, pk: f64) {
+        if self.diffusing_indices.is_empty() {
+            return;
+        }
+
+        let should_solidify = self.calculate_solidification_decisions(pa, pk);
+        self.apply_solidification(&should_solidify);
+    }
+
+    /// Perform solidification step with periodic attachment probability potential
+    /// pa(y) = pa_max * sin^2(k * 2π * y / width)
+    pub fn solidify_periodic(&mut self, pa_max: f64, pk: f64, pa_k: f64) {
+        if self.diffusing_indices.is_empty() {
+            return;
+        }
+
+        let should_solidify = self.calculate_periodic_solidification_decisions(pa_max, pk, pa_k);
+        self.apply_solidification(&should_solidify);
     }
 }
 
