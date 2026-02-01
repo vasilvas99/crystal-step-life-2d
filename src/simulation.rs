@@ -1,4 +1,4 @@
-use crate::attachment_engine::Grid;
+use crate::attachment_engine::{Grid, GridView};
 
 pub enum PaState {
     Constant,
@@ -63,6 +63,9 @@ impl SimulationState {
 
     pub fn grid(&self) -> &Grid {
         &self.grid
+    }
+    pub fn get_grid_view(&self) -> GridView<'_> {
+        self.grid.get_view()
     }
 
     pub fn get_time_step(&self) -> usize {

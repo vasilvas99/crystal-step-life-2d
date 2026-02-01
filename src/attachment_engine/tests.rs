@@ -84,9 +84,10 @@ fn test_diffuse_step_preserves_atom_count() {
         .filter(|&&s| s == CellState::Empty)
         .count();
 
-    // Perform diffusion step
-    grid.diffuse();
-
+    // Perform diffusion step 50 times
+    for _ in 0..50 {
+        grid.diffuse();
+    }
     let final_diffusing = grid.diffusing_indices.len();
     let final_solid = grid.solid_indices.len();
     let final_empty = grid
@@ -249,10 +250,11 @@ fn test_check_neighbors_detects_kink_sites() {
     // - below (test_row, test_col) = solid ✓
     // - left (test_row-1, test_col-1) = solid ✓
     // kink = below && (left || right) = true
-    let (is_kink, has_neighbor) = grid.check_neighbors(test_row - 1, test_col);
 
-    assert!(is_kink, "Failed to detect kink site");
-    assert!(has_neighbor, "Failed to detect solid neighbor");
+    match grid.check_neighbors(test_row - 1, test_col) {
+        AttachmentType::ToKink => {}
+        _ => panic!("Failed to detect kink site"),
+    }
 }
 
 #[test]
@@ -269,10 +271,10 @@ fn test_check_neighbors_detects_regular_neighbors() {
     grid.set_cell(test_x, test_y, CellState::Solid);
 
     // Position above should have neighbor but not be a kink
-    let (is_kink, has_neighbor) = grid.check_neighbors(test_x, test_y - 1);
-
-    assert!(!is_kink, "False positive kink detection");
-    assert!(has_neighbor, "Failed to detect solid neighbor");
+    match grid.check_neighbors(test_x, test_y - 1) {
+        AttachmentType::ToAny => {}
+        _ => panic!("Failed to detect proper non-kink neighbor"),
+    }
 }
 
 #[test]

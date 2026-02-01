@@ -9,6 +9,12 @@ pub enum CellState {
     Solid,
 }
 
+pub enum AttachmentType {
+    ToKink,
+    ToAny,
+    NoAttachment,
+}
+
 #[derive(Clone)]
 pub struct Grid {
     pub width: usize,
@@ -20,6 +26,28 @@ pub struct Grid {
 
 pub struct GridView<'a> {
     grid: &'a Grid,
+}
+
+impl<'a> GridView<'a> {
+    pub fn width(&self) -> usize {
+        self.grid.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.grid.height
+    }
+
+    pub fn diffusing_count(&self) -> usize {
+        self.grid.diffusing_indices.len()
+    }
+
+    pub fn solid_count(&self) -> usize {
+        self.grid.solid_indices.len()
+    }
+
+    pub fn total_atom_count(&self) -> usize {
+        self.diffusing_count() + self.solid_count()
+    }
 }
 
 impl<'a> std::ops::Index<(usize, usize)> for GridView<'a> {
@@ -67,7 +95,9 @@ impl Grid {
         let index = self.get_index(x, y);
         &self.cells[index]
     }
-
+    pub fn get_view(&self) -> GridView<'_> {
+        GridView { grid: &self }
+    }
     fn get_cell_by_index(&self, index: usize) -> CellState {
         self.cells[index]
     }
@@ -115,7 +145,7 @@ impl Grid {
             return;
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut positions = empty_positions;
         positions.shuffle(&mut rng);
 
@@ -133,7 +163,7 @@ impl Grid {
             return;
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut indices_to_remove: Vec<usize> = (0..self.diffusing_indices.len()).collect();
         indices_to_remove.shuffle(&mut rng);
 
@@ -176,8 +206,8 @@ impl Grid {
         y: usize,
         rng: &mut impl Rng,
     ) -> (usize, usize, bool) {
-        let step_x = rng.gen_range(-1..=1);
-        let step_y = rng.gen_range(-1..=1);
+        let step_x = rng.random_range(-1..=1);
+        let step_y = rng.random_range(-1..=1);
 
         let new_x = x as i32 + step_x;
         let new_y = y as i32 + step_y;
@@ -205,7 +235,7 @@ impl Grid {
             .zip(can_move.par_iter_mut())
             .enumerate()
             .for_each(|(idx, (target, can_move_flag))| {
-                let mut local_rng = rand::thread_rng();
+                let mut local_rng = rand::rng();
                 let index = shuffled_indices[idx];
                 let (x, y) = self.index_to_coords(index);
 
@@ -264,7 +294,7 @@ impl Grid {
 
         // Phase 1: Shuffle indices to ensure fairness (serial)
         let mut shuffled_indices = self.diffusing_indices.clone();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         shuffled_indices.shuffle(&mut rng);
 
         // Phase 2: Calculate target positions (parallel)
@@ -274,9 +304,7 @@ impl Grid {
         self.apply_moves(&shuffled_indices, &target_positions, &can_move);
     }
 
-    /// Check if a cell has solid neighbors and determine if it's a kink site
-    /// Returns (is_kink, has_solid_neighbor)
-    pub fn check_neighbors(&self, x: usize, y: usize) -> (bool, bool) {
+    pub fn check_neighbors(&self, x: usize, y: usize) -> AttachmentType {
         let below = if x + 1 < self.height {
             self.get_cell_by_index(self.get_index(x + 1, y)) == CellState::Solid
         } else {
@@ -304,18 +332,22 @@ impl Grid {
         let is_kink = below && (left || right);
         let has_solid_neighbor = above || below || left || right;
 
-        (is_kink, has_solid_neighbor)
+        if is_kink {
+            AttachmentType::ToKink
+        } else if has_solid_neighbor {
+            AttachmentType::ToAny
+        } else {
+            AttachmentType::NoAttachment
+        }
     }
 
     fn calculate_attachment_probability(&self, x: usize, y: usize, pa: f64, pk: f64) -> f64 {
-        let (is_kink, has_solid_neighbor) = self.check_neighbors(x, y);
+        let attachment_type = self.check_neighbors(x, y);
 
-        if is_kink {
-            pk
-        } else if has_solid_neighbor {
-            pa
-        } else {
-            0.0
+        match attachment_type {
+            AttachmentType::ToKink => pk,
+            AttachmentType::ToAny => pa,
+            AttachmentType::NoAttachment => 0.0,
         }
     }
 
@@ -327,17 +359,15 @@ impl Grid {
         pk: f64,
         pa_k: f64,
     ) -> f64 {
-        let (is_kink, has_solid_neighbor) = self.check_neighbors(x, y);
-
-        if is_kink {
-            pk
-        } else if has_solid_neighbor {
-            pa_max
-                * (pa_k * 2.0 * std::f64::consts::PI * y as f64 / self.width as f64)
-                    .sin()
-                    .powi(2)
-        } else {
-            0.0
+        match self.check_neighbors(x, y) {
+            AttachmentType::ToKink => pk,
+            AttachmentType::ToAny => {
+                pa_max
+                    * (pa_k * 2.0 * std::f64::consts::PI * y as f64 / self.width as f64)
+                        .sin()
+                        .powi(2)
+            }
+            AttachmentType::NoAttachment => 0.0,
         }
     }
 
@@ -349,12 +379,12 @@ impl Grid {
             .par_iter_mut()
             .enumerate()
             .for_each(|(idx, should_solidify_flag)| {
-                let mut local_rng = rand::thread_rng();
+                let mut local_rng = rand::rng();
                 let index = self.diffusing_indices[idx];
                 let (x, y) = self.index_to_coords(index);
 
                 let probability = self.calculate_attachment_probability(x, y, pa, pk);
-                if probability > 0.0 && local_rng.gen_bool(probability) {
+                if probability > 0.0 && local_rng.random_bool(probability) {
                     *should_solidify_flag = true;
                 }
             });
@@ -375,13 +405,13 @@ impl Grid {
             .par_iter_mut()
             .enumerate()
             .for_each(|(idx, should_solidify_flag)| {
-                let mut local_rng = rand::thread_rng();
+                let mut local_rng = rand::rng();
                 let index = self.diffusing_indices[idx];
                 let (x, y) = self.index_to_coords(index);
 
                 let probability =
                     self.calculate_periodic_attachment_probability(x, y, pa_max, pk, pa_k);
-                if probability > 0.0 && local_rng.gen_bool(probability) {
+                if probability > 0.0 && local_rng.random_bool(probability) {
                     *should_solidify_flag = true;
                 }
             });
