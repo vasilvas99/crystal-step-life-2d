@@ -6,7 +6,7 @@ pub enum PaState {
 }
 
 pub struct SimulationState {
-    pub time_step: usize,
+    time_step: usize,
     grid: Grid,
     c0_old: f64,
     c0: f64,
@@ -61,9 +61,6 @@ impl SimulationState {
         self.time_step += 1;
     }
 
-    pub fn grid(&self) -> &Grid {
-        &self.grid
-    }
     pub fn get_grid_view(&self) -> GridView<'_> {
         self.grid.get_view()
     }

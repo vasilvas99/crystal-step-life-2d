@@ -7,12 +7,14 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
+use crate::attachment_engine::GridView;
+
 fn clear_screen() {
     print!("\x1B[2J\x1B[1;1H");
     io::stdout().flush().unwrap();
 }
 
-fn render_grid(grid: &Grid, show_area: (usize, usize, usize, usize)) {
+fn render_grid(grid: GridView, show_area: (usize, usize, usize, usize)) {
     let (start_x, start_y, width, height) = show_area;
 
     // Top border
@@ -26,7 +28,7 @@ fn render_grid(grid: &Grid, show_area: (usize, usize, usize, usize)) {
     for x in start_x..start_x + height {
         print!("│");
         for y in start_y..start_y + width {
-            if x >= grid.height || y >= grid.width {
+            if x >= grid.height() || y >= grid.width() {
                 print!(" ");
                 continue;
             }
@@ -114,7 +116,7 @@ fn main() {
             println!();
 
             // Calculate viewing window to show bottom of grid (where crystal grows)
-            let grid_ref = sim.grid();
+            let grid_ref = sim.get_grid_view();
             let start_x = if grid_size > display_height {
                 grid_size - display_height // Show bottom portion
             } else {
@@ -147,7 +149,7 @@ fn main() {
     println!("╚═══════════════════════════════════════════════════════════╝");
     println!();
 
-    let grid_ref = sim.grid();
+    let grid_ref = sim.get_grid_view();
     let start_x = if grid_size > display_height {
         grid_size - display_height // Show bottom portion
     } else {

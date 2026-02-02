@@ -48,6 +48,10 @@ impl<'a> GridView<'a> {
     pub fn total_atom_count(&self) -> usize {
         self.diffusing_count() + self.solid_count()
     }
+
+    pub fn get_cell(&self, x: usize, y: usize) -> CellState {
+        *self.grid.get_cell(x, y)
+    }
 }
 
 impl<'a> std::ops::Index<(usize, usize)> for GridView<'a> {
@@ -104,7 +108,7 @@ impl Grid {
 
     fn find_topmost_solid_row(&self) -> usize {
         self.solid_indices
-            .iter()
+            .par_iter()
             .map(|&idx| self.index_to_coords(idx).0)
             .min()
             .unwrap_or(self.height)
@@ -112,7 +116,7 @@ impl Grid {
 
     fn collect_empty_positions_above_row(&self, row_limit: usize) -> Vec<usize> {
         self.cells
-            .iter()
+            .par_iter()
             .enumerate()
             .filter(|(idx, state)| {
                 **state == CellState::Empty && self.index_to_coords(*idx).0 < row_limit
@@ -123,7 +127,7 @@ impl Grid {
 
     pub fn count_diffusing_above_row(&self, row_limit: usize) -> usize {
         self.diffusing_indices
-            .iter()
+            .par_iter()
             .filter(|&&idx| self.index_to_coords(idx).0 < row_limit)
             .count()
     }
@@ -131,7 +135,7 @@ impl Grid {
     fn calculate_concentration_delta(&self, target_c0: f64) -> i64 {
         let total_empty = self
             .cells
-            .iter()
+            .par_iter()
             .filter(|&&state| state == CellState::Empty)
             .count();
         let total_diffusing = self.diffusing_indices.len();
