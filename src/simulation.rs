@@ -76,4 +76,58 @@ impl SimulationState {
     pub fn count_diffusing_cells(&self) -> usize {
         self.grid.diffusing_indices.len()
     }
+
+    pub fn set_pa_mode_constant(&mut self) {
+        self.pa_state = PaState::Constant;
+    }
+
+    pub fn set_pa_mode_periodic(&mut self) {
+        self.pa_state = PaState::Periodic;
+    }
+
+    pub fn update_c0(&mut self, new_c0: f64) {
+        self.c0_old = self.c0;
+        self.c0 = new_c0;
+    }
+
+    pub fn set_pa(&mut self, new_pa: f64) {
+        self.pa = new_pa;
+    }
+
+    pub fn set_pk(&mut self, new_pk: f64) {
+        self.pk = new_pk;
+    }
+
+    pub fn set_pa_wavenumber(&mut self, new_wavenumber: f64) {
+        self.pa_wavenumber = new_wavenumber;
+    }
+
+    pub fn set_nds(&mut self, new_nds: usize) {
+        self.nds = new_nds;
+    }
+
+    pub fn get_mode(&self) -> &PaState {
+        &self.pa_state
+    }
+
+    pub fn get_c0(&self) -> f64 {
+        self.c0
+    }
+
+    pub fn get_pa(&self) -> f64 {
+        self.pa
+    }
+
+    pub fn get_pk(&self) -> f64 {
+        self.pk
+    }
+
+    pub fn get_pa_wavenumber(&self) -> f64 {
+        self.pa_wavenumber
+    }
+
+    pub fn get_nds(&self) -> usize {
+        self.nds
+    }
+    
 }
