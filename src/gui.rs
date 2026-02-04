@@ -1,6 +1,5 @@
 use crate::attachment_engine::CellState;
 use crate::simulation::{PaState, SimulationState};
-use eframe;
 use eframe::egui;
 use egui::{Color32, ColorImage, Response, Sense, TextureHandle, TextureOptions, Vec2};
 use rayon::prelude::*;
@@ -184,11 +183,10 @@ impl Gui {
             if ui
                 .button(egui::RichText::new(pause_text).size(FONT_SIZE))
                 .clicked()
+                && self.started
             {
-                if self.started {
-                    self.paused = !self.paused;
-                }
-            };
+                self.paused = !self.paused;
+            }
         });
 
         let pa_mode_text = match self.simulation_state.pa_state {

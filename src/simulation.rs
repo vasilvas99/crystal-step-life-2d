@@ -19,6 +19,7 @@ pub struct SimulationState {
 }
 
 impl SimulationState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         grid_width: usize,
         grid_height: usize,

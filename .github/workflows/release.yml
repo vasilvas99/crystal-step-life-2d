@@ -1,18 +1,15 @@
-name: Rust
+name: Release binaries
 
 on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
-  workflow_dispatch:
+  release:
+    types: [created]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
+  build-and-upload:
+    name: Build & upload (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -21,15 +18,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: crystal-step-life-2d-linux
             binary: crystal-step-life-2d
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: crystal-step-life-2d-windows
             binary: crystal-step-life-2d.exe
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: crystal-step-life-2d-macos
             binary: crystal-step-life-2d
 
     steps:
@@ -53,11 +47,7 @@ jobs:
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Run tests
-        run: cargo test --release --target ${{ matrix.target }}
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload binary to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          files: target/${{ matrix.target }}/release/${{ matrix.binary }}

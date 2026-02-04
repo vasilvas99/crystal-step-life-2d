@@ -100,7 +100,7 @@ impl Grid {
         &self.cells[index]
     }
     pub fn get_view(&self) -> GridView<'_> {
-        GridView { grid: &self }
+        GridView { grid: self }
     }
     fn get_cell_by_index(&self, index: usize) -> CellState {
         self.cells[index]
@@ -424,17 +424,18 @@ impl Grid {
     }
 
     /// Apply solidification decisions (serial phase)
+    #[allow(clippy::needless_range_loop)]
     fn apply_solidification(&mut self, should_solidify: &[bool]) {
         let mut new_diffusing_list = Vec::with_capacity(self.diffusing_indices.len());
 
         for idx in 0..self.diffusing_indices.len() {
-            let index = self.diffusing_indices[idx];
+            let diffusing_idx = self.diffusing_indices[idx];
             if should_solidify[idx] {
-                let (x, y) = self.index_to_coords(index);
+                let (x, y) = self.index_to_coords(diffusing_idx);
                 self.set_cell(x, y, CellState::Solid);
-                self.solid_indices.push(index);
+                self.solid_indices.push(diffusing_idx);
             } else {
-                new_diffusing_list.push(index);
+                new_diffusing_list.push(diffusing_idx);
             }
         }
 
