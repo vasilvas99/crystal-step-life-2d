@@ -275,13 +275,13 @@ impl Gui {
     }
 
     fn draw_splash_screen(&mut self, ctx: &egui::Context) {
-        egui::Window::new("Crystal Step Life 2D")
+        egui::Window::new("Crystal Life 2D")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("Welcome to Crystal Step Life 2D");
+                    ui.heading("Welcome to Crystal Life 2D");
                     ui.add_space(10.0);
                 });
 
@@ -293,7 +293,7 @@ impl Gui {
 
                 egui::Grid::new("help_grid")
                     .num_columns(2)
-                    .spacing([20.0, 8.0])
+                    .spacing([40.0, 8.0])
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new("c₀").size(FONT_SIZE).strong());
                         ui.label(
@@ -311,7 +311,14 @@ impl Gui {
 
                         ui.label(egui::RichText::new("Pa").size(FONT_SIZE).strong());
                         ui.label(
-                            egui::RichText::new("Probability of attachment (A21 transition)")
+                            egui::RichText::new("Probability of attachment one (A21)")
+                                .size(FONT_SIZE),
+                        );
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Pk").size(FONT_SIZE).strong());
+                        ui.label(
+                            egui::RichText::new("Probability of attachment to kink (A2K)")
                                 .size(FONT_SIZE),
                         );
                         ui.end_row();
@@ -340,7 +347,7 @@ impl Gui {
 
                 egui::Grid::new("color_grid")
                     .num_columns(2)
-                    .spacing([20.0, 8.0])
+                    .spacing([40.0, 8.0])
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new("■").size(FONT_SIZE).color(SOLID_COLOR));
                         ui.label(egui::RichText::new("Solid (crystallized) atoms").size(FONT_SIZE));
@@ -369,17 +376,17 @@ impl Gui {
                 ui.separator();
                 ui.add_space(10.0);
 
-                ui.label(egui::RichText::new("In detail:").size(FONT_SIZE).strong());
+                ui.heading(egui::RichText::new("In detail:").size(FONT_SIZE).strong());
                 ui.add_space(5.0);
 
-                // TODO: Finish help text
-                ui.label(
-                    egui::RichText::new(
-                        "This simulation is based on the following attachment events to an initial\
-                solid crystal wall at the bottom of the grid.",
-                    )
-                    .size(FONT_SIZE),
-                );
+                egui::ScrollArea::vertical()
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(include_str!("include/simulation_description.txt"))
+                                .size(FONT_SIZE),
+                        );
+                    });
 
                 ui.add_space(20.0);
 

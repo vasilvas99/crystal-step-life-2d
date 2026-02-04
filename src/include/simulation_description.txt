@@ -1,0 +1,18 @@
+This simulation provides a dynamic environment for MC+CA crystal growth models. The simulation includes
+the following two events:
+    - Nucleation Event (attachment to one, A21) : This event simulates the attachment of a particle to a crystal surface
+    where the particle requires a single neighboring particle in the crystal lattice to attach.
+    - Crystallization Event (attachment to kink, A2K): This event simulates the attachment of a particle to a crystal surface
+    to kink sites.
+The simulation parameters include:
+    - c0 - Initial concentration of particles in the solution (maintained constant throughout the simulation)
+    - Pa - Probability of attachment to one neighbor (nucleation event)
+    - Pk - Probability of attachment to kink site (crystallization event)
+    - nds - Number of diffusional steps per simulation step
+The Pa probability can be modulated in two ways:
+    - Constant Pa: The attachment probability remains constant along the crystal surface (lattice row)
+    - Periodic Pa: The attachment probability varies periodically along the crystal surface (lattice row) with sin^2 modulation.
+    At this point an additional control parameter is introduced - the wavenumber of the modulation. This is visualized
+    as an (inverted) sine wave at the top of the simulation grid. The peaks of the wave correspond to regions of high
+    A21 probability.
+

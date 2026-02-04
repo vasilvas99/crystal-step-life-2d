@@ -19,12 +19,15 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: crystal-step-life-2d
+            artifact_name: crystal-step-life-2d-linux
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: crystal-step-life-2d.exe
+            artifact_name: crystal-step-life-2d-windows.exe
           - os: macos-latest
             target: aarch64-apple-darwin
             binary: crystal-step-life-2d
+            artifact_name: crystal-step-life-2d-macos
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +50,11 @@ jobs:
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Rename binary
+        shell: bash
+        run: mv target/${{ matrix.target }}/release/${{ matrix.binary }} target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
       - name: Upload binary to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          files: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
