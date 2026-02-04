@@ -43,11 +43,9 @@ impl SimulationState {
     }
 
     pub fn step(&mut self) {
-        if self.c0 != self.c0_old {
-            self.grid
-                .adjust_diffusing_concentration(self.c0, self.c0_old);
-            self.c0_old = self.c0;
-        }
+        self.grid
+            .adjust_diffusing_concentration(self.c0, self.c0_old);
+        self.c0_old = self.c0;
 
         for _ in 0..self.nds {
             self.grid.diffuse();

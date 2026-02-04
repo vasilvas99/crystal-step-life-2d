@@ -120,7 +120,7 @@ impl Gui {
             egui::StrokeKind::Outside,
         );
 
-        //
+        // TODO: Implement drawing of periodic Pa potential overlay
         // // Draw periodic Pa potential overlay if enabled
         // if self.sim.periodic_pa && self.sim.started {
         //     self.draw_pa_potential(ui, centered_rect);
@@ -142,49 +142,8 @@ impl Gui {
         ui.label(egui::RichText::new(format!("Total Atoms: {}", total_count)).size(FONT_SIZE));
         ui.label(egui::RichText::new(format!("FPS: {:.1}", self.fps)).size(FONT_SIZE));
     }
-    fn draw_controls(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Simulation parameters");
-        ui.separator();
-        ui.add_space(10.0);
-        ui.add(
-            egui::Slider::new(&mut self.simulation_state.c0, 0.0..=1.0)
-                .text(egui::RichText::new("Initial Concentration (c₀)").size(FONT_SIZE))
-                .logarithmic(self.log_sliders),
-        );
-        ui.add(
-            egui::Slider::new(&mut self.simulation_state.nds, 1..=300)
-                .text(egui::RichText::new("Number of diffusion steps (nds)").size(FONT_SIZE)),
-        );
 
-        match self.simulation_state.pa_state {
-            PaState::Constant => {
-                ui.add(
-                    egui::Slider::new(&mut self.simulation_state.pa, 1e-6..=1.0)
-                        .text(egui::RichText::new("Constant A21 Probability (Pa)").size(FONT_SIZE))
-                        .logarithmic(self.log_sliders),
-                );
-            }
-            PaState::Periodic => {
-                ui.add(
-                    egui::Slider::new(&mut self.simulation_state.pa, 1e-6..=1.0)
-                        .text(
-                            egui::RichText::new("Amplitude of A21 Probability (Pa)")
-                                .size(FONT_SIZE),
-                        )
-                        .logarithmic(self.log_sliders),
-                );
-                ui.add(
-                    egui::Slider::new(&mut self.simulation_state.pa_wavenumber, 0.1..=10.0)
-                        .text(egui::RichText::new("Wavenumber of Pa modulation").size(FONT_SIZE))
-                        .logarithmic(self.log_sliders),
-                );
-            }
-        }
-
-        ui.checkbox(&mut self.log_sliders, "Logarithmic Sliders");
-
-        ui.add_space(20.0);
-
+    fn draw_simulation_control_btns(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let start_text = if self.started { "Restart" } else { "Start" };
             if ui
@@ -228,6 +187,61 @@ impl Gui {
                 PaState::Periodic => PaState::Constant,
             };
         }
+    }
+
+    fn draw_simulation_parameters_widgets(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Simulation parameters");
+        ui.separator();
+        ui.add_space(10.0);
+        ui.add(
+            egui::Slider::new(&mut self.simulation_state.c0, 0.0..=1.0)
+                .text(egui::RichText::new("Initial Concentration (c₀)").size(FONT_SIZE))
+                .logarithmic(self.log_sliders),
+        );
+        ui.add(
+            egui::Slider::new(&mut self.simulation_state.nds, 1..=300)
+                .text(egui::RichText::new("Number of diffusion steps (nds)").size(FONT_SIZE)),
+        );
+        ui.add(
+            egui::Slider::new(&mut self.simulation_state.pk, 0.0..=1.0)
+                .text(egui::RichText::new("A2K probability (Pk)").size(FONT_SIZE))
+                .logarithmic(self.log_sliders),
+        );
+
+        match self.simulation_state.pa_state {
+            PaState::Constant => {
+                ui.add(
+                    egui::Slider::new(&mut self.simulation_state.pa, 1e-6..=1.0)
+                        .text(egui::RichText::new("Constant A21 Probability (Pa)").size(FONT_SIZE))
+                        .logarithmic(self.log_sliders),
+                );
+            }
+            PaState::Periodic => {
+                ui.add(
+                    egui::Slider::new(&mut self.simulation_state.pa, 1e-6..=1.0)
+                        .text(
+                            egui::RichText::new("Amplitude of A21 Probability (Pa)")
+                                .size(FONT_SIZE),
+                        )
+                        .logarithmic(self.log_sliders),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.simulation_state.pa_wavenumber, 0.1..=10.0)
+                        .text(egui::RichText::new("Wavenumber of Pa modulation").size(FONT_SIZE))
+                        .logarithmic(self.log_sliders),
+                );
+            }
+        }
+
+        ui.checkbox(&mut self.log_sliders, "Logarithmic Sliders");
+    }
+
+    fn draw_controls(&mut self, ui: &mut egui::Ui) {
+        self.draw_simulation_parameters_widgets(ui);
+
+        ui.add_space(20.0);
+
+        self.draw_simulation_control_btns(ui);
 
         ui.add_space(20.0);
         ui.heading("Statistics");
