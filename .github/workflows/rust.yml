@@ -1,0 +1,62 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: crystal-step-life-2d-linux
+            binary: crystal-step-life-2d
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: crystal-step-life-2d-windows
+            binary: crystal-step-life-2d.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: crystal-step-life-2d-macos
+            binary: crystal-step-life-2d
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.89.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.89.0
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Run tests
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
