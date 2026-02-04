@@ -9,8 +9,8 @@ const EMPTY_COLOR: Color32 = Color32::BLACK;
 const DIFFUSING_COLOR: Color32 = Color32::from_rgb(100, 100, 255);
 const SOLID_COLOR: Color32 = Color32::from_rgb(200, 200, 200);
 const BORDER_COLOR: Color32 = Color32::from_rgb(128, 0, 128);
+const SINUSOID_COLOR: Color32 = Color32::GREEN;
 const FONT_SIZE: f32 = 15.0;
-
 pub struct Gui {
     simulation_state: SimulationState,
     last_frame_time: std::time::Instant,
@@ -120,11 +120,28 @@ impl Gui {
             egui::StrokeKind::Outside,
         );
 
-        // TODO: Implement drawing of periodic Pa potential overlay
-        // // Draw periodic Pa potential overlay if enabled
-        // if self.sim.periodic_pa && self.sim.started {
-        //     self.draw_pa_potential(ui, centered_rect);
-        // }
+        // draw an upside down sinuosoidal path at the top of the rectangle if in periodic mode
+        // y = pa_max * sin^2(k * 2π * x / width)
+        if let PaState::Periodic = self.simulation_state.pa_state {
+            let points: Vec<egui::Pos2> = (0..=100)
+                .map(|i| {
+                    let t = i as f32 / 100.0;
+                    let x = centered_rect.left() + t * centered_rect.width();
+                    let frequency = self.simulation_state.pa_wavenumber as f32;
+                    let amplitude = 30.0;
+                    let y = centered_rect.top()
+                        + self.simulation_state.pa as f32
+                            * (amplitude
+                                * (frequency * 2.0 * std::f32::consts::PI * t).sin().powi(2));
+                    egui::pos2(x, y)
+                })
+                .collect();
+
+            ui.painter().add(egui::epaint::Shape::line(
+                points,
+                egui::Stroke::new(5.0, SINUSOID_COLOR),
+            ));
+        }
 
         response
     }
