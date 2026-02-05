@@ -435,6 +435,8 @@ impl eframe::App for Gui {
             self.draw_splash_screen(ctx);
         }
 
-        ctx.request_repaint()
+        if self.started && !self.paused {
+            ctx.request_repaint();
+        }
     }
 }
