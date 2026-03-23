@@ -73,7 +73,7 @@ fn test_index_to_coords_conversion() {
 }
 
 #[test]
-fn test_diffuse_step_preserves_atom_count() {
+fn test_diffuse_margolus_preserves_atom_count() {
     let mut grid = Grid::new(50, 50, 0.3);
 
     let initial_diffusing = grid.diffusing_indices.len();
@@ -84,11 +84,16 @@ fn test_diffuse_step_preserves_atom_count() {
         .filter(|&&s| s == CellState::Empty)
         .count();
 
-    // Perform diffusion step 50 times
+    // Perform Margolus diffusion steps (even + odd parity pairs)
     for _ in 0..50 {
-        grid.diffuse();
+        grid.diffuse_margolus();
+        grid.diffuse_margolus();
     }
+
+    grid.rebuild_diffusing_indices();
+
     let final_diffusing = grid.diffusing_indices.len();
+    // solid_indices unchanged since diffusion never moves solid cells
     let final_solid = grid.solid_indices.len();
     let final_empty = grid
         .cells
@@ -117,12 +122,14 @@ fn test_diffuse_step_preserves_atom_count() {
 }
 
 #[test]
-fn test_diffuse_step_no_atoms_stuck_in_solid() {
+fn test_diffuse_margolus_no_atoms_stuck_in_solid() {
     let mut grid = Grid::new(50, 50, 0.3);
 
     // Perform multiple diffusion steps
     for _ in 0..10 {
-        grid.diffuse();
+        grid.diffuse_margolus();
+        grid.diffuse_margolus();
+        grid.rebuild_diffusing_indices();
 
         // Check that no diffusing atoms are in solid positions
         for &idx in &grid.diffusing_indices {
@@ -222,34 +229,11 @@ fn test_solidify_periodic_preserves_atoms() {
 fn test_check_neighbors_detects_kink_sites() {
     let mut grid = Grid::new(50, 50, 0.0);
 
-    // Create a kink site pattern (x=row, y=column):
-    // The bottom row (x=49) is already solid
-    // Add solids to create a kink above it:
-    // Row 47: . X .  <- test position (47, 24) should detect kink
-    // Row 48: X X .  <- (48, 24) and (48, 25) are solid
-    // Row 49: S S S  <- bottom row (already all solid)
-
-    let test_row = 48; // One row above bottom (bottom is 49)
+    let test_row = 48;
     let test_col = 25;
 
-    // Add a solid at (test_row, test_col)
     grid.set_cell(test_row, test_col, CellState::Solid);
-
-    // Position at (test_row-1, test_col) should be a kink site:
-    // - below: (test_row, test_col) = solid ✓
-    // - below: (test_row+1, test_col) = also solid (bottom row) ✓
-    // Wait, that's not right. Let me reconsider...
-
-    // Actually, for position (47, 25):
-    // - below: (48, 25) = solid ✓
-    // - right: (47, 26) = empty
-    // - left: (47, 24) = need to make solid for kink
     grid.set_cell(test_row - 1, test_col - 1, CellState::Solid);
-
-    // Position at (test_row-1, test_col) should now be a kink:
-    // - below (test_row, test_col) = solid ✓
-    // - left (test_row-1, test_col-1) = solid ✓
-    // kink = below && (left || right) = true
 
     match grid.check_neighbors(test_row - 1, test_col) {
         AttachmentType::ToKink => {}
@@ -261,16 +245,11 @@ fn test_check_neighbors_detects_kink_sites() {
 fn test_check_neighbors_detects_regular_neighbors() {
     let mut grid = Grid::new(50, 50, 0.0);
 
-    // Create a non-kink neighbor:
-    // .X.
-    // .S.
-    // SSS (solid row at bottom)
     let test_x = 25;
     let test_y = grid.height - 2;
 
     grid.set_cell(test_x, test_y, CellState::Solid);
 
-    // Position above should have neighbor but not be a kink
     match grid.check_neighbors(test_x, test_y - 1) {
         AttachmentType::ToAny => {}
         _ => panic!("Failed to detect proper non-kink neighbor"),
@@ -342,7 +321,8 @@ fn test_no_duplicate_indices() {
 
     // Perform several steps
     for _ in 0..10 {
-        grid.diffuse();
+        grid.diffuse_margolus();
+        grid.diffuse_margolus();
         grid.solidify(0.1, 0.3);
     }
 
@@ -384,7 +364,8 @@ fn test_grid_consistency_after_multiple_steps() {
 
     // Run simulation for multiple steps
     for _ in 0..20 {
-        grid.diffuse();
+        grid.diffuse_margolus();
+        grid.diffuse_margolus();
         grid.solidify(0.1, 0.3);
 
         // Verify consistency: indices match grid state
@@ -467,7 +448,8 @@ fn test_empty_grid_operations() {
     grid.diffusing_indices.clear();
 
     // These should not panic
-    grid.diffuse();
+    grid.diffuse_margolus();
+    grid.diffuse_margolus();
     grid.solidify(0.5, 0.8);
     grid.solidify_periodic(0.5, 0.8, 2.0);
 
@@ -508,5 +490,52 @@ fn test_find_topmost_uses_correct_coordinate() {
     assert_eq!(
         topmost, 10,
         "find_topmost_solid_row should return minimum x coordinate (row)"
+    );
+}
+
+#[test]
+fn test_margolus_parity_alternates() {
+    let mut grid = Grid::new(10, 10, 0.0);
+
+    assert!(!grid.parity);
+    grid.diffuse_margolus();
+    assert!(grid.parity);
+    grid.diffuse_margolus();
+    assert!(!grid.parity);
+}
+
+#[test]
+fn test_margolus_does_not_move_solid_cells() {
+    // Use non-zero density so Diffusing particles sit next to Solid cells
+    // in the same 2x2 blocks, verifying Solid is truly excluded from shuffles.
+    let mut grid = Grid::new(10, 10, 0.3);
+
+    // Record initial solid positions (bottom row)
+    let initial_solid: Vec<usize> = grid
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|&(_, &s)| s == CellState::Solid)
+        .map(|(i, _)| i)
+        .collect();
+
+    // Run many diffusion steps (both parities)
+    for _ in 0..100 {
+        grid.diffuse_margolus();
+        grid.diffuse_margolus();
+    }
+
+    // Solid cells should not have moved
+    let final_solid: Vec<usize> = grid
+        .cells
+        .iter()
+        .enumerate()
+        .filter(|&(_, &s)| s == CellState::Solid)
+        .map(|(i, _)| i)
+        .collect();
+
+    assert_eq!(
+        initial_solid, final_solid,
+        "Solid cells moved during Margolus diffusion"
     );
 }

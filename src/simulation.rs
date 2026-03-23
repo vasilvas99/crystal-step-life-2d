@@ -49,7 +49,10 @@ impl SimulationState {
         self.c0_old = self.c0;
 
         for _ in 0..self.nds {
-            self.grid.diffuse();
+            // Two Margolus sub-steps (even + odd parity) per diffusion
+            // iteration to allow particles to cross block boundaries
+            self.grid.diffuse_margolus();
+            self.grid.diffuse_margolus();
         }
 
         match self.pa_state {

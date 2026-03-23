@@ -22,6 +22,7 @@ pub struct Grid {
     cells: Vec<CellState>,
     pub solid_indices: Vec<usize>,
     pub diffusing_indices: Vec<usize>,
+    parity: bool,
 }
 
 pub struct GridView<'a> {
@@ -70,6 +71,7 @@ impl Grid {
             cells: vec![CellState::Empty; width * height],
             solid_indices: Vec::new(),
             diffusing_indices: Vec::new(),
+            parity: false,
         };
 
         // set bottom row to Solid (x=height-1, all y columns)
@@ -123,13 +125,6 @@ impl Grid {
             })
             .map(|(idx, _)| idx)
             .collect()
-    }
-
-    pub fn count_diffusing_above_row(&self, row_limit: usize) -> usize {
-        self.diffusing_indices
-            .par_iter()
-            .filter(|&&idx| self.index_to_coords(idx).0 < row_limit)
-            .count()
     }
 
     fn calculate_concentration_delta(&self, target_c0: f64) -> i64 {
@@ -204,108 +199,76 @@ impl Grid {
         }
     }
 
-    fn calculate_random_move_claim(
-        &self,
-        x: usize,
-        y: usize,
-        rng: &mut impl Rng,
-    ) -> (usize, usize, bool) {
-        let step_x = rng.random_range(-1..=1);
-        let step_y = rng.random_range(-1..=1);
+    /// Diffuse particles using Margolus neighbourhood partitioning.
+    ///
+    /// The grid is divided into non-overlapping 2x2 blocks. Within each block,
+    /// the non-solid cells are randomly shuffled (permuted). Because blocks are
+    /// independent, all blocks are processed fully in parallel with no conflict
+    /// resolution needed.
+    ///
+    /// The `parity` flag alternates the block offset between (0,0) and (1,1)
+    /// each call, ensuring particles can cross block boundaries over successive
+    /// sub-steps.
+    ///
+    /// **Diffusion rate:** The uniform random permutation within each 2×2 block
+    /// yields a higher effective diffusion coefficient than a nearest-neighbour
+    /// random walk. Adjust `nds` if a specific diffusion rate is needed.
+    /// Boundary rows/columns participate in blocks on only one parity, so edge
+    /// particles diffuse at half the interior rate (inherent to Margolus).
+    ///
+    /// **Important:** This method modifies `cells` in-place but does NOT update
+    /// `diffusing_indices`. Callers must either call `rebuild_diffusing_indices`
+    /// or rely on `solidify`/`solidify_periodic` (which rebuild it internally).
+    pub fn diffuse_margolus(&mut self) {
+        let w = self.width;
+        let h = self.height;
+        let offset = if self.parity { 1 } else { 0 };
+        self.parity = !self.parity;
 
-        let new_x = x as i32 + step_x;
-        let new_y = y as i32 + step_y;
-
-        // Check if target is valid (within bounds and not solid, diffusing conflicts handled later)
-        let can_move = new_x >= 0
-            && (new_x as usize) < self.height
-            && new_y >= 0
-            && (new_y as usize) < self.width
-            && self.cells[self.get_index(new_x as usize, new_y as usize)] != CellState::Solid;
-
-        (new_x as usize, new_y as usize, can_move)
-    }
-
-    fn calculate_target_positions(
-        &self,
-        shuffled_indices: &[usize],
-    ) -> (Vec<(usize, usize)>, Vec<bool>) {
-        let n_atoms = shuffled_indices.len();
-        let mut target_positions: Vec<(usize, usize)> = vec![(0, 0); n_atoms];
-        let mut can_move: Vec<bool> = vec![false; n_atoms];
-
-        target_positions
-            .par_iter_mut()
-            .zip(can_move.par_iter_mut())
-            .enumerate()
-            .for_each(|(idx, (target, can_move_flag))| {
-                let mut local_rng = rand::rng();
-                let index = shuffled_indices[idx];
-                let (x, y) = self.index_to_coords(index);
-
-                let (new_x, new_y, can_move_local) =
-                    self.calculate_random_move_claim(x, y, &mut local_rng);
-                *target = (new_x, new_y);
-                *can_move_flag = can_move_local;
-            });
-
-        (target_positions, can_move)
-    }
-
-    fn apply_moves(
-        &mut self,
-        shuffled_indices: &[usize],
-        target_positions: &[(usize, usize)],
-        can_move: &[bool],
-    ) {
-        let mut claimed = vec![false; self.width * self.height];
-        let mut new_diffusing_list = Vec::with_capacity(shuffled_indices.len());
-
-        for idx in 0..shuffled_indices.len() {
-            let index = shuffled_indices[idx];
-            let (x, y) = self.index_to_coords(index);
-
-            if can_move[idx] {
-                let (new_x, new_y) = target_positions[idx];
-                let new_index = self.get_index(new_x, new_y);
-
-                // Check if position is empty and not yet claimed
-                if self.cells[new_index] == CellState::Empty && !claimed[new_index] {
-                    // Move succeeds
-                    self.set_cell(x, y, CellState::Empty);
-                    self.set_cell(new_x, new_y, CellState::Diffusing);
-                    claimed[new_index] = true;
-                    new_diffusing_list.push(new_index);
-                } else {
-                    // Move blocked - stay in place
-                    new_diffusing_list.push(index);
-                }
-            } else {
-                // Can't move (out of bounds or solid) - stay in place
-                new_diffusing_list.push(index);
-            }
-        }
-
-        self.diffusing_indices = new_diffusing_list;
-    }
-
-    pub fn diffuse(&mut self) {
-        let n_atoms = self.diffusing_indices.len();
-
-        if n_atoms == 0 {
+        let row_start = offset;
+        let usable_rows = ((h - row_start) / 2) * 2;
+        if usable_rows < 2 || w < 2 {
             return;
         }
 
-        // Phase 1: Shuffle indices to ensure fairness (serial)
-        let mut shuffled_indices = self.diffusing_indices.clone();
-        let mut rng = rand::rng();
-        shuffled_indices.shuffle(&mut rng);
+        let col_start = offset;
+        let start = row_start * w;
+        let end = (row_start + usable_rows) * w;
 
-        // Phase 2: Calculate target positions (parallel)
-        let (target_positions, can_move) = self.calculate_target_positions(&shuffled_indices);
+        // Boundary rows/columns only participate in blocks on one parity,
+        // so edge particles diffuse at half rate — inherent to Margolus.
 
-        // Phase 3: Apply moves (serial, with conflict resolution)
-        self.apply_moves(&shuffled_indices, &target_positions, &can_move);
+        self.cells[start..end]
+            .par_chunks_mut(2 * w)
+            .for_each(|chunk| {
+                let mut rng = rand::rng();
+                let mut col = col_start;
+                while col + 1 < w {
+                    let indices = [col, col + 1, w + col, w + col + 1];
+
+                    // Collect non-solid positions in the block
+                    let mut movable = [0usize; 4];
+                    let mut n = 0;
+                    for &i in &indices {
+                        if chunk[i] != CellState::Solid {
+                            movable[n] = i;
+                            n += 1;
+                        }
+                    }
+
+                    // Fisher-Yates shuffle of non-solid cell states.
+                    // Solid cells stay pinned; the remaining states are
+                    // randomly permuted, which conserves particle count.
+                    if n > 1 {
+                        for i in (1..n).rev() {
+                            let j = rng.random_range(0..=i);
+                            chunk.swap(movable[i], movable[j]);
+                        }
+                    }
+
+                    col += 2;
+                }
+            });
     }
 
     pub fn check_neighbors(&self, x: usize, y: usize) -> AttachmentType {
@@ -375,91 +338,81 @@ impl Grid {
         }
     }
 
-    fn calculate_solidification_decisions(&self, pa: f64, pk: f64) -> Vec<bool> {
-        let n_atoms = self.diffusing_indices.len();
-        let mut should_solidify = vec![false; n_atoms];
-
-        should_solidify
-            .par_iter_mut()
+    /// Rebuild `diffusing_indices` from the cells array.
+    ///
+    /// Useful after Margolus diffusion (which shuffles cells in-place)
+    /// when the index list needs to be resynchronised with the grid.
+    /// Not required before `solidify`/`solidify_periodic`, which scan
+    /// cells directly and rebuild the list as a side effect.
+    pub fn rebuild_diffusing_indices(&mut self) {
+        self.diffusing_indices = self
+            .cells
+            .par_iter()
             .enumerate()
-            .for_each(|(idx, should_solidify_flag)| {
-                let mut local_rng = rand::rng();
-                let index = self.diffusing_indices[idx];
-                let (x, y) = self.index_to_coords(index);
-
-                let probability = self.calculate_attachment_probability(x, y, pa, pk);
-                if probability > 0.0 && local_rng.random_bool(probability) {
-                    *should_solidify_flag = true;
-                }
-            });
-
-        should_solidify
+            .filter(|&(_, &s)| s == CellState::Diffusing)
+            .map(|(i, _)| i)
+            .collect();
     }
 
-    fn calculate_periodic_solidification_decisions(
-        &self,
-        pa_max: f64,
-        pk: f64,
-        pa_k: f64,
-    ) -> Vec<bool> {
-        let n_atoms = self.diffusing_indices.len();
-        let mut should_solidify = vec![false; n_atoms];
-
-        should_solidify
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(idx, should_solidify_flag)| {
-                let mut local_rng = rand::rng();
-                let index = self.diffusing_indices[idx];
-                let (x, y) = self.index_to_coords(index);
-
-                let probability =
-                    self.calculate_periodic_attachment_probability(x, y, pa_max, pk, pa_k);
-                if probability > 0.0 && local_rng.random_bool(probability) {
-                    *should_solidify_flag = true;
-                }
-            });
-
-        should_solidify
-    }
-
-    /// Apply solidification decisions (serial phase)
-    #[allow(clippy::needless_range_loop)]
-    fn apply_solidification(&mut self, should_solidify: &[bool]) {
-        let mut new_diffusing_list = Vec::with_capacity(self.diffusing_indices.len());
-
-        for idx in 0..self.diffusing_indices.len() {
-            let diffusing_idx = self.diffusing_indices[idx];
-            if should_solidify[idx] {
-                let (x, y) = self.index_to_coords(diffusing_idx);
-                self.set_cell(x, y, CellState::Solid);
-                self.solid_indices.push(diffusing_idx);
-            } else {
-                new_diffusing_list.push(diffusing_idx);
-            }
-        }
-
-        self.diffusing_indices = new_diffusing_list;
-    }
-
+    /// Solidify diffusing particles adjacent to solid cells.
+    ///
+    /// Scans the `cells` array directly (no dependency on `diffusing_indices`),
+    /// then rebuilds `diffusing_indices` as a side effect of the serial apply
+    /// phase. This avoids the need for a separate `rebuild_diffusing_indices`
+    /// call between diffusion and solidification.
     pub fn solidify(&mut self, pa: f64, pk: f64) {
-        if self.diffusing_indices.is_empty() {
-            return;
-        }
+        let decisions: Vec<(usize, bool)> = self
+            .cells
+            .par_iter()
+            .enumerate()
+            .filter_map(|(idx, &s)| {
+                if s != CellState::Diffusing {
+                    return None;
+                }
+                let (x, y) = self.index_to_coords(idx);
+                let prob = self.calculate_attachment_probability(x, y, pa, pk);
+                Some((idx, prob > 0.0 && rand::rng().random_bool(prob)))
+            })
+            .collect();
 
-        let should_solidify = self.calculate_solidification_decisions(pa, pk);
-        self.apply_solidification(&should_solidify);
+        self.apply_solidification_decisions(&decisions);
     }
 
     /// Perform solidification step with periodic attachment probability potential
-    /// pa(y) = pa_max * sin^2(k * 2π * y / width)
+    /// pa(y) = pa_max * sin^2(k * 2pi * y / width)
+    ///
+    /// Scans cells directly and rebuilds `diffusing_indices`, like `solidify`.
     pub fn solidify_periodic(&mut self, pa_max: f64, pk: f64, pa_k: f64) {
-        if self.diffusing_indices.is_empty() {
-            return;
+        let decisions: Vec<(usize, bool)> = self
+            .cells
+            .par_iter()
+            .enumerate()
+            .filter_map(|(idx, &s)| {
+                if s != CellState::Diffusing {
+                    return None;
+                }
+                let (x, y) = self.index_to_coords(idx);
+                let prob = self.calculate_periodic_attachment_probability(x, y, pa_max, pk, pa_k);
+                Some((idx, prob > 0.0 && rand::rng().random_bool(prob)))
+            })
+            .collect();
+
+        self.apply_solidification_decisions(&decisions);
+    }
+
+    fn apply_solidification_decisions(&mut self, decisions: &[(usize, bool)]) {
+        let mut new_diffusing = Vec::with_capacity(decisions.len());
+
+        for &(idx, should_solidify) in decisions {
+            if should_solidify {
+                self.cells[idx] = CellState::Solid;
+                self.solid_indices.push(idx);
+            } else {
+                new_diffusing.push(idx);
+            }
         }
 
-        let should_solidify = self.calculate_periodic_solidification_decisions(pa_max, pk, pa_k);
-        self.apply_solidification(&should_solidify);
+        self.diffusing_indices = new_diffusing;
     }
 }
 
